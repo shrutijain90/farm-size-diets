@@ -8,6 +8,7 @@ library(circlize)
 library(legendry)
 library(conflicted)
 library(shadowtext)
+library(forcats)
 conflicts_prefer(dplyr::filter)
 conflicts_prefer(dplyr::lag)
 conflicts_prefer(dplyr::rename)
@@ -25,6 +26,63 @@ small_groups <- "Small"     # for heatmaps: small share = <5 ha
 recode_region <- function(x) {
   dplyr::recode(as.character(x), "FSU" = "CNE")
 }
+
+# Common label maps
+fg_map <- c("Fruits and vegetables"="Fruits & Veg", "Grains"="Grains",
+            "Legumes, nuts and seeds"="Legumes & Nuts",
+            "Oilcrops and sugar crops"="Oil & Sugar",
+            "Roots and tubers"="Roots & Tubers", "Soybeans"="Soybeans")
+fg_levels   <- c("Grains","Roots & Tubers","Fruits & Veg","Soybeans","Legumes & Nuts","Oil & Sugar")
+regions_rev <- rev(c("CNE","EAP","EUR","LAC","MEN","NAM","SAS","SSA"))
+
+diet_short  <- c("BMK", "FLX", "PSC", "VEG", "VGN")
+diet_order  <- paste(year_end, diet_short)
+
+# Colors for 3 bins + total
+fill_colors <- c(
+  "Small"  = "#1a5c2a",
+  "Medium" = "#999999",
+  "Large"  = "#D4A843",
+  "Total"  = "#3D6B7A"
+)
+label_colors <- c("Small"="#1a5c2a","Medium"="#999999","Large"="#D4A843")
+
+# for the 11 groups
+fs_11_labels <- c(
+  "1"    = "0–1",
+  "2"    = "1–2",
+  "5"    = "2–5",
+  "10"   = "5–10",
+  "20"   = "10–20",
+  "50"   = "20–50",
+  "100"  = "50–100",
+  "200"  = "100–200",
+  "500"  = "200–500",
+  "1000" = "500–1000",
+  "5000" = "1000–5000"
+)
+
+# A smooth green-to-gold gradient
+fs_11_colors <- c(
+  "0–1"      = "#0B3D1E",
+  "1–2"      = "#1a5c2a",
+  "2–5"      = "#2E7D3A",
+  "5–10"     = "#a8a8a8",   
+  "10–20"    = "#c8c8c8",   
+  "20–50"    = "#dcdcdc",   
+  "50–100"   = "#E8C46A",
+  "100–200"  = "#D4A843",
+  "200–500"  = "#B8882A",
+  "500–1000" = "#8C6518",
+  "1000–5000"= "#5E4410"
+)
+
+fs_category <- c(
+  "0–1" = "Small", "1–2" = "Small", "2–5" = "Small",
+  "5–10" = "Medium", "10–20" = "Medium", "20–50" = "Medium",
+  "50–100" = "Large", "100–200" = "Large", "200–500" = "Large",
+  "500–1000" = "Large", "1000–5000" = "Large"
+)
 
 # Shared reader: reads raw CSV once, adds fs_plot
 read_raw <- function(path) {
@@ -117,63 +175,6 @@ df      <- prep_summary("summary.csv")
 df_11   <- prep_summary_11("summary.csv")
 df_crop <- prep_summary_crop("summary.csv")
 
-
-# Common label maps
-fg_map <- c("Fruits and vegetables"="Fruits & Veg", "Grains"="Grains",
-            "Legumes, nuts and seeds"="Legumes & Nuts",
-            "Oilcrops and sugar crops"="Oil & Sugar",
-            "Roots and tubers"="Roots & Tubers", "Soybeans"="Soybeans")
-fg_levels   <- c("Grains","Roots & Tubers","Fruits & Veg","Soybeans","Legumes & Nuts","Oil & Sugar")
-regions_rev <- rev(c("CNE","EAP","EUR","LAC","MEN","NAM","SAS","SSA"))
-
-diet_short  <- c("BMK", "FLX", "PSC", "VEG", "VGN")
-diet_order  <- paste(year_end, diet_short)
-
-# Colors for 3 bins + total
-fill_colors <- c(
-  "Small"  = "#1a5c2a",
-  "Medium" = "#999999",
-  "Large"  = "#D4A843",
-  "Total"  = "#3D6B7A"
-)
-label_colors <- c("Small"="#1a5c2a","Medium"="#999999","Large"="#D4A843")
-
-# for the 11 groups
-fs_11_labels <- c(
-  "1"    = "0–1",
-  "2"    = "1–2",
-  "5"    = "2–5",
-  "10"   = "5–10",
-  "20"   = "10–20",
-  "50"   = "20–50",
-  "100"  = "50–100",
-  "200"  = "100–200",
-  "500"  = "200–500",
-  "1000" = "500–1000",
-  "5000" = "1000–5000"
-)
-
-# A smooth green-to-gold gradient
-fs_11_colors <- c(
-  "0–1"      = "#0B3D1E",
-  "1–2"      = "#1a5c2a",
-  "2–5"      = "#2E7D3A",
-  "5–10"     = "#a8a8a8",   
-  "10–20"    = "#c8c8c8",   
-  "20–50"    = "#dcdcdc",   
-  "50–100"   = "#E8C46A",
-  "100–200"  = "#D4A843",
-  "200–500"  = "#B8882A",
-  "500–1000" = "#8C6518",
-  "1000–5000"= "#5E4410"
-)
-
-fs_category <- c(
-  "0–1" = "Small", "1–2" = "Small", "2–5" = "Small",
-  "5–10" = "Medium", "10–20" = "Medium", "20–50" = "Medium",
-  "50–100" = "Large", "100–200" = "Large", "200–500" = "Large",
-  "500–1000" = "Large", "1000–5000" = "Large"
-)
 
 
 #######################################################################################
@@ -528,7 +529,7 @@ for (i in seq_along(diet_order)) {
     
     labels_df <- bind_rows(labels_df, tibble(
       x = x_j, y = max(running_top, new_top),
-      label = paste0(ifelse(dv >= 0, "+", ""), round(dv)),
+      label = paste0(ifelse(dv >= 0, "+", ""), format(round(dv), big.mark = ",")),
       color = label_colors[fs], size = 2.8, fontface = "bold", vjust = -0.4
     ))
     
@@ -706,7 +707,7 @@ for (fg in food_groups) {
       ))
       all_labels <- bind_rows(all_labels, tibble(
         food = fg_short, x = x_j, y = max(running_top, new_top),
-        label = paste0(ifelse(dv >= 0, "+", ""), round(dv)),
+        label = paste0(ifelse(dv >= 0, "+", ""), format(round(dv), big.mark = ",")),
         color = label_colors[fs], size = 2.3, fontface = "bold", vjust = -0.4
       ))
       
@@ -803,17 +804,17 @@ p_by_food <- ggplot() +
   labs(
     y = "Million tonnes", fill = NULL
   ) +
-  theme_minimal(base_size = 10) +
+  theme_minimal(base_size = 13) +
   theme(
     strip.text = element_text(face = "bold", size = 10),
     axis.title.x = element_blank(),
-    axis.text.x = element_text(size = 7.5, color = "#333333", face = "bold",
+    axis.text.x = element_text(size = 9, color = "#333333", face = "bold",
                                lineheight = 1.1, margin = margin(t = 4)),
     axis.ticks.x = element_blank(),
     panel.grid.major.x = element_blank(),
     panel.grid.minor = element_blank(),
     legend.position = "bottom",
-    legend.text = element_text(size = 9),
+    legend.text = element_text(size = 10),
     panel.spacing = unit(1, "lines"),
     plot.margin = margin(10, 15, 10, 10)
   ) +
@@ -821,7 +822,7 @@ p_by_food <- ggplot() +
 
 p_by_food
 
-ggsave(paste0("total_production_by_food_", size_scn_pick, "_", year_end, ".png"), p_by_food, width = 8, height = 15, dpi = 600)
+ggsave(paste0("total_production_by_food_", size_scn_pick, "_", year_end, ".png"), p_by_food, width = 9.5, height = 15, dpi = 600)
 
 
 
@@ -1480,21 +1481,25 @@ plot_boxplot_change <- function(df, var = c("cons", "prod")) {
   var_label <- ifelse(var == "cons", "Consumption", "Production")
   
   agg <- df %>%
-    filter(year == year_end, size_scn == size_scn_pick) %>%
+    filter(
+      year == year_end, 
+      RCP == rcp_pick,
+      lib_scn == lib_pick,
+      size_scn == size_scn_pick) %>%
     group_by(abbreviation, diet_scn) %>%
     summarise(
-      cs20 = sum(.data[[paste0(var, "_small_2020")]]),
-      cm20 = sum(.data[[paste0(var, "_medium_2020")]]),
-      cl20 = sum(.data[[paste0(var, "_large_2020")]]),
-      cs30 = sum(.data[[paste0(var, "_small")]]),
-      cm30 = sum(.data[[paste0(var, "_medium")]]),
-      cl30 = sum(.data[[paste0(var, "_large")]]),
+      s20 = sum(.data[[paste0(var, "_small_2020")]]),
+      m20 = sum(.data[[paste0(var, "_medium_2020")]]),
+      l20 = sum(.data[[paste0(var, "_large_2020")]]),
+      s_yr = sum(.data[[paste0(var, "_small")]]),
+      m_yr = sum(.data[[paste0(var, "_medium")]]),
+      l_yr = sum(.data[[paste0(var, "_large")]]),
       .groups = "drop"
     ) %>%
     mutate(
-      pct_small  = (cs30 - cs20) / cs20 * 100,
-      pct_medium = (cm30 - cm20) / cm20 * 100,
-      pct_large  = (cl30 - cl20) / cl20 * 100
+      pct_small  = (s_yr - s20) / s20 * 100,
+      pct_medium = (m_yr - m20) / m20 * 100,
+      pct_large  = (l_yr - l20) / l20 * 100
     )
   
   plot_df <- agg %>%
@@ -1524,8 +1529,8 @@ plot_boxplot_change <- function(df, var = c("cons", "prod")) {
                linewidth = 0.4) +
     
     geom_boxplot(
-      width = 0.65,
-      position = position_dodge(width = 0.75),
+      width = 0.55,
+      position = position_dodge(width = 0.7),
       outlier.size = 0.7,
       outlier.alpha = 0.3,
       color = "grey40",
@@ -1558,14 +1563,14 @@ plot_boxplot_change <- function(df, var = c("cons", "prod")) {
       y = paste0("Change in ", var_label, " Volume: 2020 to ", year_end)
     ) +
     
-    theme_minimal(base_size = 11) +
+    theme_minimal(base_size = 13) +
     theme(
-      axis.text.y        = element_text(size = 10),
-      axis.text.x        = element_text(size = 8, face = "bold"),
+      axis.text.y        = element_text(size = 11),
+      axis.text.x        = element_text(size = 11, color = "#333333", face = "bold"),
       panel.grid.major.y = element_blank(),
       panel.grid.minor   = element_blank(),
       legend.position    = "bottom",
-      legend.text        = element_text(size = 10),
+      legend.text        = element_text(size = 11),
       plot.margin        = margin(10, 15, 10, 10)
     )
   
@@ -1574,11 +1579,135 @@ plot_boxplot_change <- function(df, var = c("cons", "prod")) {
 
 p_cons <- plot_boxplot_change(df_country, "cons")
 p_cons
-ggsave(paste0("boxplot_cons_change_", size_scn_pick, "_", year_end, ".png"), p_cons, width = 5, height = 6, dpi = 300)
+ggsave(paste0("boxplot_cons_change_", size_scn_pick, "_", year_end, ".png"), p_cons, width = 10, height = 6, dpi = 300)
 
 p_prod <- plot_boxplot_change(df_country, "prod")
 p_prod
-ggsave(paste0("boxplot_prod_change_", size_scn_pick, "_", year_end, ".png"), p_prod, width = 5, height = 6, dpi = 300)
+ggsave(paste0("boxplot_prod_change_", size_scn_pick, "_", year_end, ".png"), p_prod, width = 10, height = 6, dpi = 300)
+
+
+
+#######################################################################################
+################################## BUBBLE CHART #######################################
+#######################################################################################
+
+df_country <- read_csv("country_summary.csv", show_col_types = FALSE)
+
+oecd_countries <- c(
+  "AUS", "AUT", "BLX", "CAN", "CHL", "CHP", "CZE", "DEU", "DNK",
+  "FNP", "FRP", "GRC", "HUN", "IRL", "ISR", "ITP", "JPN", "KOR",
+  "MEX", "NLD", "NOR", "NZL", "POL", "PRT", "SPP", "SVK", "SVN",
+  "SWE", "TUR", "UKP", "USA"
+)
+
+plot_bubble_change <- function(df, diet_pick, var = c("cons", "prod")) {
+
+  var <- match.arg(var)
+  var_label <- ifelse(var == "cons", "Consumption", "Production")
+
+  agg <- df %>%
+    filter(
+      year == year_end,
+      diet_scn == paste0(year_end, " ", diet_pick),
+      RCP == rcp_pick,
+      lib_scn == lib_pick,
+      size_scn == size_scn_pick) %>%
+    group_by(abbreviation, diet_scn) %>%
+    summarise(
+      t20 = sum(.data[[paste0(var, "_total_2020")]]),
+      s20 = sum(.data[[paste0(var, "_small_2020")]]),
+      t_yr = sum(.data[[paste0(var, "_total")]]),
+      s_yr = sum(.data[[paste0(var, "_small")]]),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      rel_20_small  = (s20 / t20) * 100,
+      rel_yr_small  = (s_yr / t_yr) * 100,
+      rel_change_small  = ((s_yr / t_yr) - (s20 / t20)) * 100,
+      label_x = pmin(rel_20_small, rel_yr_small) - 1,
+      point_type = if_else(abbreviation %in% oecd_countries, "plus", "circle")
+    ) %>%
+    mutate(abbreviation = forcats::fct_reorder(abbreviation, rel_20_small))
+
+  agg_circle <- dplyr::filter(agg, point_type == "circle")
+  agg_plus   <- dplyr::filter(agg, point_type == "plus")
+  
+  p <- ggplot(agg) +
+    geom_segment(aes(x = rel_20_small, xend = rel_yr_small,
+                     y = abbreviation, yend = abbreviation),
+                 colour = "grey80", linewidth = 0.5) +
+    geom_point(
+      data = agg_circle,
+      aes(x = rel_20_small, y = abbreviation, colour = "2020"),
+      size = 1.2,
+      shape = 16
+    ) +
+    geom_point(
+      data = agg_circle,
+      aes(x = rel_yr_small, y = abbreviation, colour = paste(year_end, diet_pick)),
+      size = 1.2,
+      shape = 16
+    ) +
+    geom_point(
+      data = agg_plus,
+      aes(x = rel_20_small, y = abbreviation, colour = "2020"),
+      size = 0.8,
+      shape = 3,
+      stroke = 0.8
+    ) +
+    geom_point(
+      data = agg_plus,
+      aes(x = rel_yr_small, y = abbreviation, colour = paste(year_end, diet_pick)),
+      size = 0.8,
+      shape = 3,
+      stroke = 0.8
+    ) +
+    geom_text(
+      aes(x = label_x, y = abbreviation, label = abbreviation),
+      hjust = 1,
+      size = 2.2
+    ) +
+    scale_colour_manual(
+      values = setNames(c("#333333", "grey60"),
+                        c("2020", paste(year_end, diet_pick))),
+      name = NULL
+    ) +
+    scale_x_continuous(
+      breaks = seq(0, 100, by = 10),
+      labels = function(x) paste0(x, "%")) +
+    labs(x = "Small-farm share of national consumption (%)", y = NULL) +
+    guides(
+      colour = guide_legend(
+        override.aes = list(
+          shape = c(16, 16),
+          size = 3
+        )
+      )
+    ) +
+    theme_minimal(base_size = 9) +
+    theme(panel.grid.major.y = element_blank(),
+          panel.grid.minor = element_blank(),
+          axis.text.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          axis.line.y = element_blank(),
+          legend.position = "top",
+          legend.key.width = unit(0.45, "cm"),
+          legend.spacing.x = unit(0.1, "cm"),
+          legend.text = element_text(margin = margin(l = -0.5)),
+          plot.margin = margin(5.5, 5.5, 5.5, 18)
+          )
+
+  return(p)
+}
+
+p_rel_cons <- plot_bubble_change(df_country, "FLX", "cons")
+p_rel_cons
+ggsave(paste0("bubble_cons_reliance_FLX_", size_scn_pick, "_", year_end, ".png"), p_rel_cons, width = 5, height = 16, dpi = 300)
+
+p_rel_cons <- plot_bubble_change(df_country, "BMK", "cons")
+p_rel_cons
+ggsave(paste0("bubble_cons_reliance_BMK_", size_scn_pick, "_", year_end, ".png"), p_rel_cons, width = 5, height = 16, dpi = 300)
+
 
 #######################################################################################
 ########################### TRADE NETWORKS ############################################
