@@ -9,6 +9,7 @@ library(legendry)
 library(conflicted)
 library(shadowtext)
 library(forcats)
+library(ggh4x)
 conflicts_prefer(dplyr::filter)
 conflicts_prefer(dplyr::lag)
 conflicts_prefer(dplyr::rename)
@@ -83,6 +84,9 @@ fs_category <- c(
   "50–100" = "Large", "100–200" = "Large", "200–500" = "Large",
   "500–1000" = "Large", "1000–5000" = "Large"
 )
+
+diet_cols <- c("BMK" = "#C0392B", "FLX" = "#E59D3A",
+               "PSC" = "#2E6DB4", "VEG" = "#7FC6E8", "VGN" = "#1a5c2a")
 
 # Shared reader: reads raw CSV once, adds fs_plot
 read_raw <- function(path) {
@@ -831,643 +835,350 @@ ggsave(paste0("total_production_by_food_", size_scn_pick, "_", year_end, ".png")
 ###################### CONSUMPTION/PRODUCTION BY CROP/REGION ##########################
 #######################################################################################
 
-plot_total_range <- function(df, var = c("cons", "prod"), show_labels = FALSE) {
+plot_total_grid <- function(df, var = c("cons", "prod")) {
   
   var <- match.arg(var)
-  
   var_label <- ifelse(var == "cons", "Consumption", "Production")
-  x_label   <- paste0(var_label, " volume (million tonnes)")
   
-  # 2020 baseline
   df_2020 <- df %>%
     filter(year == 2020) %>%
     group_by(group, food_group) %>%
-    summarise(vol_2020 = sum(.data[[var]])/1e6, .groups = "drop")
+    summarise(value = sum(.data[[var]]) / 1e6, .groups = "drop") %>%
+    mutate(base = "2020 baseline")
   
-  # 2030 range across diet scenarios
   df_end <- df %>%
-    filter(year == year_end,
-           RCP == rcp_pick,
-           lib_scn == lib_pick,
-           size_scn == size_scn_pick) %>%
+    filter(year == year_end, RCP == rcp_pick,
+           lib_scn == lib_pick, size_scn == size_scn_pick) %>%
     group_by(group, food_group, diet_scn) %>%
-    summarise(vol = sum(.data[[var]])/1e6, .groups = "drop") %>%
-    group_by(group, food_group) %>%
-    summarise(
-      vol_min   = min(vol),
-      vol_max   = max(vol),
-      diet_min  = diet_scn[which.min(vol)],
-      diet_max  = diet_scn[which.max(vol)],
-      .groups   = "drop"
-    ) %>%
-    mutate(
-      diet_min = sub("^\\d+\\s+", "", diet_min),
-      diet_max = sub("^\\d+\\s+", "", diet_max)
-    )
+    summarise(value = sum(.data[[var]]) / 1e6, .groups = "drop") %>%
+    mutate(diet = factor(sub("^\\d+\\s+", "", diet_scn), levels = diet_short)) %>%
+    select(-diet_scn)
   
-  plot_df <- df_2020 %>%
-    left_join(df_end, by = c("group", "food_group"))
+  fix_labs <- function(d) {
+    d$food   <- factor(fg_map[d$food_group], levels = fg_levels)
+    d$region <- factor(d$group, levels = regions_rev)
+    d
+  }
+  df_2020 <- fix_labs(df_2020)
+  df_end  <- fix_labs(df_end)
   
-  plot_df$food <- factor(fg_map[plot_df$food_group], levels = fg_levels)
-  plot_df$region <- factor(plot_df$group, levels = regions_rev)
+  row_shade_df <- data.frame(region = levels(df_2020$region)) %>%
+    mutate(i = as.numeric(factor(region, levels = regions_rev)),
+           ymin = i - 0.5, ymax = i + 0.5) %>%
+    filter(i %% 2 == 0)
   
-  # ---- alternating row shading ----
-  row_shade_df <- expand.grid(
-    food = levels(plot_df$food),
-    region = levels(plot_df$region)
-  ) %>%
-    mutate(
-      region_index = as.numeric(region),
-      ymin = region_index - 0.5,
-      ymax = region_index + 0.5,
-      shade = ifelse(region_index %% 2 == 0, "grey95", NA)
-    )
-  
-  p <- ggplot(plot_df, aes(y = region)) +
-    
-    # Row stripes
-    geom_rect(
-      data = row_shade_df %>% filter(!is.na(shade)),
-      aes(xmin = -Inf, xmax = Inf, ymin = ymin, ymax = ymax),
-      inherit.aes = FALSE,
-      fill = "grey95",
-      alpha = 0.6
-    ) +
-    
-    # 2030 range
-    geom_segment(
-      aes(x = vol_min, xend = vol_max, yend = region),
-      linewidth = 2.2,
-      color = "#6E6E6E",
-      alpha = 0.85
-    ) +
-    geom_point(aes(x = vol_min), size = 1.2, color = "#6E6E6E") +
-    geom_point(aes(x = vol_max), size = 1.2, color = "#6E6E6E") +
-    
-    # 2020 baseline marker |
-    geom_point(
-      aes(x = vol_2020),
-      shape = 124,
-      size = 6,
-      color = "#000000",
-      stroke = 1.2
-    ) +
+  ggplot() +
+    geom_rect(data = row_shade_df,
+              aes(xmin = -Inf, xmax = Inf, ymin = ymin, ymax = ymax),
+              fill = "grey95", alpha = 0.6, inherit.aes = FALSE) +
     
     facet_wrap(~ food, scales = "free_x", nrow = 2) +
     
-    scale_x_continuous(
-      labels = comma,
-      expand = expansion(mult = c(0.1, 0.1))
+    geom_point(data = df_end,
+               aes(x = value, y = as.numeric(region), fill = diet),
+               shape = 21, size = 2.9, stroke = 0.6, colour = "white", alpha = 0.7) +
+    
+    geom_point(data = df_2020,
+               aes(x = value, y = as.numeric(region), shape = base),
+               colour = "grey25", size = 4, stroke = 1.1) +
+    
+    scale_fill_manual(
+      values = diet_cols, name = "Diet",
+      guide = guide_legend(order = 1, ncol = 1,
+                           override.aes = list(size = 3, alpha = 1))
+    ) +
+    scale_shape_manual(
+      values = c("2020 baseline" = 124), name = NULL,
+      guide = guide_legend(order = 2, override.aes = list(size = 5))
     ) +
     
-    labs(
-      x = x_label,
-      y = NULL
-    ) +
+    scale_y_continuous(breaks = seq_along(regions_rev), labels = regions_rev,
+                       expand = expansion(add = 0.6)) +
+    scale_x_continuous(labels = comma, n.breaks = 4,
+                       expand = expansion(mult = c(0.08, 0.08))) +
     
-    theme_minimal(base_size = 11) +
+    labs(x = paste0(var_label, " volume (million tonnes)"), y = NULL) +
+    
+    theme_minimal(base_size = 13) +
     theme(
-      strip.text = element_text(face = "bold", size = 11),
-      strip.background = element_rect(fill = "grey90", color = NA),
-      axis.text.y = element_text(size = 9, face = "bold"),
-      axis.text.x = element_text(size = 8),
+      strip.text        = element_text(face = "bold", size = 12),
+      strip.background  = element_blank(),
+      axis.text.y       = element_text(size = 11, face = "bold", colour = "grey10"),
+      axis.text.x       = element_text(size = 10, colour = "black"),
+      axis.title.x      = element_text(size = 13, colour = "black",
+                                       margin = margin(t = 10)),
+      axis.ticks.x      = element_line(colour = "grey40", linewidth = 0.4),
+      axis.ticks.length = unit(3, "pt"),
+      panel.grid.major.x = element_line(colour = "grey85", linewidth = 0.4),
       panel.grid.major.y = element_blank(),
-      panel.grid.minor = element_blank(),
-      panel.border = element_rect(color = "grey80", fill = NA, linewidth = 0.6),
-      panel.spacing = unit(1.2, "lines"),
-      plot.margin = margin(10, 15, 10, 10)
+      panel.grid.minor   = element_blank(),
+      panel.border      = element_rect(colour = "grey60", fill = NA, linewidth = 0.6),
+      panel.spacing     = unit(0.9, "lines"),
+      legend.position   = "right",
+      legend.title      = element_text(size = 12, face = "bold"),
+      legend.text       = element_text(size = 11),
+      legend.key.height = unit(1.1, "lines"),
+      legend.spacing.y  = unit(1.2, "lines")
     )
-  
-  if (show_labels) {
-    p <- p + 
-      geom_text(
-        aes(x = vol_min, label = diet_min),
-        size = 2.2, hjust = 1.2, fontface = "bold", color = "#6E6E6E"
-      ) +
-      geom_text(
-        aes(x = vol_max, label = diet_max),
-        size = 2.2, hjust = -0.2, fontface = "bold", color = "#6E6E6E"
-      ) 
-  }
-  
-  p_key <- ggplot() +
-    geom_segment(aes(x = 0.5, xend = 2.5, y = 0, yend = 0),
-                 color = "grey55", linewidth = 3, alpha = 0.85,
-                 arrow = arrow(ends = "both",
-                               type = "closed",
-                               angle=20,
-                               length = unit(0.1, "inches"))) +
-    geom_segment(aes(x = 1.5, xend = 1.5, y = -1, yend = 1),
-                 color = "grey15", linewidth = 1) +
-    annotate("text", x = 1.5, y = -1.8,
-             label = "2020 baseline", hjust = 0.5, vjust = 0, size = 3,
-             color = "grey15", fontface = "bold") +
-    annotate("text", x = 1.5, y = 2.3,
-             label = paste0("Range across ", year_end, " diet scenarios"), hjust = 0.5, vjust = 1.2, size = 3.5,
-             color = "grey30") +
-    coord_cartesian(xlim = c(-2.5, 5.5), ylim = c(-2, 2)) +
-    theme_void() +
-    theme(plot.margin = margin(0, 10, 0, 10))
-  
-  p_combined <- p / p_key + plot_layout(heights = c(15, 1.5))
-  
-  return(p_combined)
 }
 
-p_cons_range = plot_total_range(df, "cons")
-p_cons_range
-ggsave(paste0("range_chart_cons_vol_", year_end, ".png"), p_cons_range, width = 10, height = 6.5, dpi = 300)
+p_cons_total <- plot_total_grid(df, "cons")
+ggsave(paste0("range_cons_vol_total_", year_end, ".png"),
+       p_cons_total, width = 11, height = 6.5, dpi = 300)
 
-p_prod_range = plot_total_range(df, "prod")
-p_prod_range
-ggsave(paste0("range_chart_prod_vol_", year_end, ".png"), p_prod_range, width = 10, height = 6.5, dpi = 300)
-
-
+p_prod_total <- plot_total_grid(df, "prod")
+ggsave(paste0("range_prod_vol_total_", year_end, ".png"),
+       p_prod_total, width = 11, height = 6.5, dpi = 300)
 
 #######################################################################################
 ################ SMALL & LARGE SHARE (VOL): 2020 vs FUTURE RANGE #####################
 #######################################################################################
-
-plot_volume_range_by_size <- function(df, var = c("cons", "prod", "imp", "exp"), show_labels = FALSE) {
+plot_volume_grid <- function(df, var = c("cons", "prod", "imp", "exp")) {
   
   var <- match.arg(var)
-  var_label <- switch(var,
-                      cons = "Consumption",
-                      prod = "Production",
-                      imp  = "Imports",
-                      exp  = "Exports"
-  )
-  x_label   <- paste0(var_label, " volume (million tonnes)")
+  var_label <- switch(var, cons="Consumption", prod="Production",
+                      imp="Imports", exp="Exports")
   
-  # ---- 2020 baseline volumes by farm size ----
   df_2020 <- df %>%
-    filter(year == 2020) %>%
+    filter(year == 2020, fs_plot %in% c("Small", "Large")) %>%
     group_by(group, food_group, fs_plot) %>%
-    summarise(vol = sum(.data[[var]])/1e6, .groups = "drop") %>%
-    filter(fs_plot %in% c("Small", "Large")) %>%
-    pivot_wider(names_from = fs_plot, values_from = vol,
-                names_prefix = "vol_2020_") %>%
-    rename(small_2020 = vol_2020_Small, large_2020 = vol_2020_Large)
+    summarise(value = sum(.data[[var]]) / 1e6, .groups = "drop") %>%
+    mutate(base = "2020 baseline")
   
-  # ---- Future range across diet scenarios by farm size ----
   df_end <- df %>%
-    filter(year == year_end,
-           RCP == rcp_pick,
-           lib_scn == lib_pick,
-           size_scn == size_scn_pick,
-           fs_plot %in% c("Small", "Large")) %>%
+    filter(year == year_end, RCP == rcp_pick, lib_scn == lib_pick,
+           size_scn == size_scn_pick, fs_plot %in% c("Small", "Large")) %>%
     group_by(group, food_group, diet_scn, fs_plot) %>%
-    summarise(vol = sum(.data[[var]])/1e6, .groups = "drop") %>%
-    pivot_wider(names_from = fs_plot, values_from = vol) %>%
-    group_by(group, food_group) %>%
-    summarise(
-      small_min      = min(Small),
-      small_max      = max(Small),
-      small_diet_min = diet_scn[which.min(Small)],
-      small_diet_max = diet_scn[which.max(Small)],
-      large_min      = min(Large),
-      large_max      = max(Large),
-      large_diet_min = diet_scn[which.min(Large)],
-      large_diet_max = diet_scn[which.max(Large)],
-      .groups = "drop"
-    ) %>%
-    mutate(
-      small_diet_min = sub("^\\d+\\s+", "", small_diet_min),
-      small_diet_max = sub("^\\d+\\s+", "", small_diet_max),
-      large_diet_min = sub("^\\d+\\s+", "", large_diet_min),
-      large_diet_max = sub("^\\d+\\s+", "", large_diet_max)
-    )
+    summarise(value = sum(.data[[var]]) / 1e6, .groups = "drop") %>%
+    mutate(diet = factor(sub("^\\d+\\s+", "", diet_scn), levels = diet_short)) %>%
+    select(-diet_scn)
   
-  plot_df <- df_2020 %>%
-    left_join(df_end, by = c("group", "food_group"))
-  
-  # ---- Labels ----
-  plot_df$food <- factor(fg_map[plot_df$food_group], levels = fg_levels)
-  plot_df$region <- factor(plot_df$group, levels = regions_rev)
-  
-  # ---- Alternating row shading ----
-  row_shade_df <- expand.grid(
-    food = levels(plot_df$food),
-    region = levels(plot_df$region)
-  ) %>%
-    mutate(
-      region_index = as.numeric(region),
-      ymin = region_index - 0.5,
-      ymax = region_index + 0.5,
-      shade = ifelse(region_index %% 2 == 0, "grey95", NA)
-    )
-  
-  p <- ggplot(plot_df, aes(y = region)) +
-    
-    # Row stripes
-    geom_rect(
-      data = row_shade_df %>% filter(!is.na(shade)),
-      aes(xmin = -Inf, xmax = Inf, ymin = ymin, ymax = ymax),
-      inherit.aes = FALSE,
-      fill = "grey95",
-      alpha = 0.6
-    ) +
-    
-    # SMALL future range (green)
-    geom_segment(
-      aes(x = small_min, xend = small_max, yend = region, color = "Small"),
-      linewidth = 2.2,
-      alpha = 0.85
-    ) +
-    geom_point(aes(x = small_min), size = 1.2, color = "#1a5c2a") +
-    geom_point(aes(x = small_max), size = 1.2, color = "#1a5c2a") +
-    
-    # LARGE future range (yellow)
-    geom_segment(
-      aes(x = large_min, xend = large_max, yend = region, color = "Large"),
-      linewidth = 2.2,
-      alpha = 0.85
-    ) +
-    geom_point(aes(x = large_min), size = 1.2, color = "#7a6518") +
-    geom_point(aes(x = large_max), size = 1.2, color = "#7a6518") +
-    
-    # 2020 Small baseline
-    geom_point(
-      aes(x = small_2020),
-      shape = 124,
-      size = 6,
-      color = "#1a5c2a",
-      stroke = 1.2
-    ) +
-    
-    # 2020 Large baseline
-    geom_point(
-      aes(x = large_2020),
-      shape = 124,
-      size = 6,
-      color = "#7a6518",
-      stroke = 1.2
-    ) +
-    
-    facet_wrap(~ food, scales = "free_x", nrow = 2) +
-    
-    scale_x_continuous(
-      labels = comma,
-      expand = expansion(mult = c(0.1, 0.1))
-    ) +
-    
-    scale_color_manual(
-      name = NULL,
-      values = c("Small" = "#6AAE7B", "Large" = "#D4A843"),
-      labels = c("Small" = "Small (<5 ha)", "Large" = "Large (>50 ha)"),
-      breaks = c("Small", "Large")
-    ) +
-    
-    labs(
-      x = x_label,
-      y = NULL
-    ) +
-    
-    theme_minimal(base_size = 11) +
-    theme(
-      strip.text = element_text(face = "bold", size = 11),
-      strip.background = element_rect(fill = "grey90", color = NA),
-      axis.text.y = element_text(size = 9, face = "bold"),
-      axis.text.x = element_text(size = 8),
-      panel.grid.major.y = element_blank(),
-      panel.grid.minor = element_blank(),
-      panel.border = element_rect(color = "grey80", fill = NA, linewidth = 0.6),
-      panel.spacing = unit(1.2, "lines"),
-      plot.margin = margin(10, 15, 10, 10)
-    )
-  
-  if (show_labels){
-    p <- p +
-      geom_text(
-        aes(x = small_min, label = small_diet_min),
-        size = 2.2, hjust = 1.2, vjust = 0.5, nudge_y = 0.25,
-        fontface = "bold", color = "#1a5c2a"
-      ) +
-        geom_text(
-          aes(x = small_max, label = small_diet_max),
-          size = 2.2, hjust = -0.2, vjust = 0.5, nudge_y = 0.25,
-          fontface = "bold", color = "#1a5c2a"
-        ) +
-        
-        # Large range labels (yellow – nudge DOWN)
-        geom_text(
-          aes(x = large_min, label = large_diet_min),
-          size = 2.2, hjust = 1.2, vjust = 0.5, nudge_y = -0.25,
-          fontface = "bold", color = "#7a6518"
-        ) +
-        geom_text(
-          aes(x = large_max, label = large_diet_max),
-          size = 2.2, hjust = -0.2, vjust = 0.5, nudge_y = -0.25,
-          fontface = "bold", color = "#7a6518"
-        ) 
+  fix_labs <- function(d) {
+    d$food    <- factor(fg_map[d$food_group], levels = fg_levels)
+    d$region  <- factor(d$group, levels = regions_rev)
+    d$fs_plot <- factor(d$fs_plot, levels = c("Small", "Large"),
+                        labels = c("Small (<5 ha)", "Large (>50 ha)"))
+    d
   }
+  df_2020 <- fix_labs(df_2020)
+  df_end  <- fix_labs(df_end)
   
-  # legend
-  color_legend <- cowplot::get_legend(
-    p + theme(legend.position = "bottom",
-              legend.justification = "center",
-              legend.text = element_text(size = 10),
-              legend.key.width = unit(1, "cm"))
-  )
+  row_shade_df <- data.frame(region = levels(df_2020$region)) %>%
+    mutate(i = as.numeric(factor(region, levels = regions_rev)),
+           ymin = i - 0.5, ymax = i + 0.5) %>%
+    filter(i %% 2 == 0)
   
-  p_key <- ggplot() +
-    geom_segment(aes(x = 0.5, xend = 2.5, y = 0, yend = 0),
-                 color = "grey55", linewidth = 3, alpha = 0.85,
-                 arrow = arrow(ends = "both",
-                               type = "closed",
-                               angle = 20,
-                               length = unit(0.1, "inches"))) +
-    geom_segment(aes(x = 1.5, xend = 1.5, y = -1, yend = 1),
-                 color = "grey15", linewidth = 1) +
-    annotate("text", x = 1.5, y = -1.8,
-             label = "2020 baseline", hjust = 0.5, vjust = 0, size = 3,
-             color = "grey15", fontface = "bold") +
-    annotate("text", x = 1.5, y = 2.3,
-             label = paste0("Range across ", year_end, " diet scenarios"), hjust = 0.5, vjust = 1.2, size = 3.5,
-             color = "grey30") +
-    coord_cartesian(xlim = c(-0.5, 3.5), ylim = c(-2, 2)) +
-    theme_void() +
-    theme(plot.margin = margin(0, 10, 0, 10))
+  # one shared x-range per crop group (across both farm-size columns)
+  rng <- bind_rows(
+    df_end  %>% select(food, value),
+    df_2020 %>% select(food, value)
+  ) %>%
+    group_by(food) %>%
+    summarise(hi = max(value, na.rm = TRUE), .groups = "drop") %>%
+    arrange(match(food, fg_levels))
   
-  p_main <- p + theme(legend.position = "none")
+  # each crop group gets the same scale in both columns
+  x_scales <- unlist(lapply(rng$hi, function(h) {
+    s <- scale_x_continuous(labels = comma, n.breaks = 4,
+                            limits = c(-0.04 * h, 1.08 * h),
+                            expand = c(0, 0))
+    list(s, s)
+  }), recursive = FALSE)
   
-  legend_row <- patchwork::wrap_plots(
-    p_key,
-    patchwork::wrap_elements(full = color_legend),
-    nrow = 1,
-    widths = c(1.5, 1.5)
-  )
-  
-  p_combined <- p_main / legend_row +
-    plot_layout(heights = c(15, 1.5))
-  
-  return(p_combined)
+  ggplot() +
+    geom_rect(data = row_shade_df,
+              aes(xmin = -Inf, xmax = Inf, ymin = ymin, ymax = ymax),
+              fill = "grey95", alpha = 0.6, inherit.aes = FALSE) +
+    
+    ggh4x::facet_grid2(food ~ fs_plot, scales = "free_x", independent = "x") +
+    ggh4x::facetted_pos_scales(x = x_scales) +
+    
+    geom_point(data = df_end,
+               aes(x = value, y = as.numeric(region), fill = diet),
+               shape = 21, size = 2.9, stroke = 0.6, colour = "white", alpha = 0.7) +
+    
+    geom_point(data = df_2020,
+               aes(x = value, y = as.numeric(region), shape = base),
+               colour = "grey25", size = 4, stroke = 1.1) +
+    
+    scale_fill_manual(
+      values = diet_cols, name = "Diet",
+      guide = guide_legend(order = 1, ncol = 1,
+                           override.aes = list(size = 3, alpha = 1))
+    ) +
+    scale_shape_manual(
+      values = c("2020 baseline" = 124), name = NULL,
+      guide = guide_legend(order = 2, override.aes = list(size = 5))
+    ) +
+    
+    scale_y_continuous(breaks = seq_along(regions_rev), labels = regions_rev,
+                       expand = expansion(add = 0.6)) +
+    
+    labs(x = paste0(var_label, " volume (million tonnes)"), y = NULL) +
+    
+    theme_minimal(base_size = 13) +
+    theme(
+      strip.text        = element_text(face = "bold", size = 11),
+      strip.background  = element_blank(),
+      axis.text.y       = element_text(size = 9, face = "bold", colour = "grey10"),
+      axis.text.x       = element_text(size = 10, colour = "black"),
+      axis.title.x      = element_text(size = 13, colour = "black",
+                                       margin = margin(t = 10)),
+      axis.ticks.x      = element_line(colour = "grey40", linewidth = 0.4),
+      axis.ticks.length = unit(3, "pt"),
+      panel.grid.major.x = element_line(colour = "grey85", linewidth = 0.4),
+      panel.grid.major.y = element_blank(),
+      panel.grid.minor   = element_blank(),
+      panel.border      = element_rect(colour = "grey60", fill = NA, linewidth = 0.6),
+      panel.spacing     = unit(0.7, "lines"),
+      legend.position   = "right",
+      legend.title      = element_text(size = 12, face = "bold"),
+      legend.text       = element_text(size = 11),
+      legend.key.height = unit(1.1, "lines"),
+      legend.spacing.y  = unit(1.2, "lines")
+    )
 }
 
-p_cons_vol_size <- plot_volume_range_by_size(df, "cons")
+p_cons_vol_size <- plot_volume_grid(df, "cons")
 p_cons_vol_size
-ggsave(paste0("range_chart_cons_vol_small_large_", size_scn_pick, "_", year_end, ".png"),
-       p_cons_vol_size, width = 10, height = 6.5, dpi = 300)
+ggsave(paste0("range_cons_vol_small_large_", size_scn_pick, "_", year_end, ".png"),
+       p_cons_vol_size, width = 8, height = 11, dpi = 300)
 
-p_prod_vol_size <- plot_volume_range_by_size(df, "prod")
+p_prod_vol_size <- plot_volume_grid(df, "prod")
 p_prod_vol_size
-ggsave(paste0("range_chart_prod_vol_small_large_", size_scn_pick, "_", year_end, ".png"),
-       p_prod_vol_size, width = 10, height = 6.5, dpi = 300)
+ggsave(paste0("range_prod_vol_small_large_", size_scn_pick, "_", year_end, ".png"),
+       p_prod_vol_size, width = 8, height = 11, dpi = 300)
 
-p_exp_vol_size <- plot_volume_range_by_size(df, "exp")
+p_exp_vol_size <- plot_volume_grid(df, "exp")
 p_exp_vol_size
-ggsave(paste0("range_chart_exp_vol_small_large_", size_scn_pick, "_", year_end, ".png"),
-       p_exp_vol_size, width = 10, height = 6.5, dpi = 300)
+ggsave(paste0("range_exp_vol_small_large_", size_scn_pick, "_", year_end, ".png"),
+       p_exp_vol_size, width = 8, height = 11, dpi = 300)
 
-p_imp_vol_size <- plot_volume_range_by_size(df, "imp")
+p_imp_vol_size <- plot_volume_grid(df, "imp")
 p_imp_vol_size
-ggsave(paste0("range_chart_imp_vol_small_large_", size_scn_pick, "_", year_end, ".png"),
-       p_imp_vol_size, width = 10, height = 6.5, dpi = 300)
-
+ggsave(paste0("range_imp_vol_small_large_", size_scn_pick, "_", year_end, ".png"),
+       p_imp_vol_size, width = 8, height = 11, dpi = 300)
 
 #######################################################################################
 ################ SMALL & LARGE SHARE (PERC): 2020 vs FUTURE RANGE #####################
 #######################################################################################
 
-plot_share_range <- function(df, var = c("cons", "prod", "imp", "exp"), show_labels = FALSE) {
+
+plot_share_grid <- function(df, var = c("cons", "prod", "imp", "exp")) {
   
   var <- match.arg(var)
-  var_label <- switch(var,
-                      cons = "Consumption",
-                      prod = "Production",
-                      imp  = "Imports",
-                      exp  = "Exports"
-  )
+  var_label <- switch(var, cons="Consumption", prod="Production",
+                      imp="Imports", exp="Exports")
   total_var <- paste0(var, "_total")
   
-  # ---- 2020 baseline shares ----
   df_2020 <- df %>%
-    filter(year == 2020) %>%
-    group_by(group, food_group) %>%
-    summarise(
-      small_2020 = sum(.data[[var]][fs_plot == "Small"]) / first(.data[[total_var]]),
-      large_2020 = sum(.data[[var]][fs_plot == "Large"]) / first(.data[[total_var]]),
-      .groups = "drop"
-    )
+    filter(year == 2020, fs_plot %in% c("Small", "Large")) %>%
+    group_by(group, food_group, fs_plot) %>%
+    summarise(value = sum(.data[[var]]) / first(.data[[total_var]]),
+              .groups = "drop") %>%
+    mutate(base = "2020 baseline")
   
-  # ---- 2030 range across diet scenarios ----
   df_end <- df %>%
-    filter(year == year_end,
-           RCP == rcp_pick,
-           lib_scn == lib_pick,
-           size_scn == size_scn_pick) %>%
-    group_by(group, food_group, diet_scn) %>%
-    summarise(
-      small = sum(.data[[var]][fs_plot == "Small"]) / first(.data[[total_var]]),
-      large = sum(.data[[var]][fs_plot == "Large"]) / first(.data[[total_var]]),
-      .groups = "drop"
-    ) %>%
-    group_by(group, food_group) %>%
-    summarise(
-      small_min      = min(small),
-      small_max      = max(small),
-      small_diet_min = diet_scn[which.min(small)],
-      small_diet_max = diet_scn[which.max(small)],
-      large_min      = min(large),
-      large_max      = max(large),
-      large_diet_min = diet_scn[which.min(large)],
-      large_diet_max = diet_scn[which.max(large)],
-      .groups = "drop"
-    ) %>%
-    mutate(
-      small_diet_min = sub("^\\d+\\s+", "", small_diet_min),
-      small_diet_max = sub("^\\d+\\s+", "", small_diet_max),
-      large_diet_min = sub("^\\d+\\s+", "", large_diet_min),
-      large_diet_max = sub("^\\d+\\s+", "", large_diet_max)
-    )
+    filter(year == year_end, RCP == rcp_pick, lib_scn == lib_pick,
+           size_scn == size_scn_pick, fs_plot %in% c("Small", "Large")) %>%
+    group_by(group, food_group, diet_scn, fs_plot) %>%
+    summarise(value = sum(.data[[var]]) / first(.data[[total_var]]),
+              .groups = "drop") %>%
+    mutate(diet = factor(sub("^\\d+\\s+", "", diet_scn), levels = diet_short)) %>%
+    select(-diet_scn)
   
-  plot_df <- df_2020 %>%
-    left_join(df_end, by = c("group", "food_group"))
-  
-  # ---- Labels ----
-  plot_df$food <- factor(fg_map[plot_df$food_group], levels = fg_levels)
-  plot_df$region <- factor(plot_df$group, levels = regions_rev)
-  
-  # ---- Alternating row shading ----
-  row_shade_df <- expand.grid(
-    food = levels(plot_df$food),
-    region = levels(plot_df$region)
-  ) %>%
-    mutate(
-      region_index = as.numeric(region),
-      ymin = region_index - 0.5,
-      ymax = region_index + 0.5,
-      shade = ifelse(region_index %% 2 == 0, "grey95", NA)
-    )
-  
-  p <- ggplot(plot_df, aes(y = region)) +
-    
-    # Row stripes
-    geom_rect(
-      data = row_shade_df %>% filter(!is.na(shade)),
-      aes(xmin = -Inf, xmax = Inf, ymin = ymin, ymax = ymax),
-      inherit.aes = FALSE,
-      fill = "grey95",
-      alpha = 0.6
-    ) +
-    
-    # SMALL 2030 range (green)
-    geom_segment(
-      aes(x = small_min, xend = small_max, yend = region, color="Small"),
-      linewidth = 2.2,
-      alpha = 0.85
-    ) +
-    geom_point(aes(x = small_min), size = 1.2, color = "#1a5c2a") +
-    geom_point(aes(x = small_max), size = 1.2, color = "#1a5c2a") +
-    
-    # LARGE 2030 range (yellow)
-    geom_segment(
-      aes(x = large_min, xend = large_max, yend = region, color="Large"),
-      linewidth = 2.2,
-      alpha = 0.85
-    ) +
-    geom_point(aes(x = large_min), size = 1.2, color = "#7a6518") +
-    geom_point(aes(x = large_max), size = 1.2, color = "#7a6518") +
-    
-    # 2020 Small baseline |
-    geom_point(
-      aes(x = small_2020),
-      shape = 124,
-      size = 6,
-      color = "#1a5c2a",
-      stroke = 1.2
-    ) +
-    
-    # 2020 Large baseline |
-    geom_point(
-      aes(x = large_2020),
-      shape = 124,
-      size = 6,
-      color = "#7a6518",
-      stroke = 1.2
-    ) +
-    
-    facet_wrap(~ food, nrow = 2) +
-    
-    scale_x_continuous(
-      limits = c(-0.08, 1.08),
-      breaks = seq(0, 1, by = 0.25),
-      labels = scales::percent_format(accuracy = 1),
-      expand = c(0, 0)
-    ) +
-    
-    scale_color_manual(
-      name = NULL,
-      values = c("Small" = "#6AAE7B", "Large" = "#D4A843"),
-      labels = c("Small" = "Small (<5 ha)", "Large" = "Large (>50 ha)"),
-      breaks = c("Small", "Large")
-    ) +
-    
-    labs(
-      x = paste0("Share of ", tolower(var_label), " (%)"),
-      y = NULL
-    ) +
-    
-    theme_minimal(base_size = 11) +
-    theme(
-      strip.text = element_text(face = "bold", size = 11),
-      strip.background = element_rect(fill = "grey90", color = NA),
-      axis.text.y = element_text(size = 9, face = "bold"),
-      axis.text.x = element_text(size = 8),
-      panel.grid.major.y = element_blank(),
-      panel.grid.minor = element_blank(),
-      panel.border = element_rect(color = "grey80", fill = NA, linewidth = 0.6),
-      panel.spacing = unit(1.2, "lines"),
-      plot.margin = margin(10, 15, 10, 10)
-    )
-  
-  if (show_labels){
-    p <- p +
-      geom_text(
-        aes(x = small_min, label = small_diet_min),
-        size = 2.2, hjust = 1.2, vjust = 0.5, nudge_y = 0.25,
-        fontface = "bold", color = "#1a5c2a"
-      ) +
-      geom_text(
-        aes(x = small_max, label = small_diet_max),
-        size = 2.2, hjust = -0.2, vjust = 0.5, nudge_y = 0.25,
-        fontface = "bold", color = "#1a5c2a"
-      ) +
-      
-      geom_text(
-        aes(x = large_min, label = large_diet_min),
-        size = 2.2, hjust = 1.2, vjust = 0.5, nudge_y = -0.25,
-        fontface = "bold", color = "#7a6518"
-      ) +
-      geom_text(
-        aes(x = large_max, label = large_diet_max),
-        size = 2.2, hjust = -0.2, vjust = 0.5, nudge_y = -0.25,
-        fontface = "bold", color = "#7a6518"
-      ) 
+  fix_labs <- function(d) {
+    d$food    <- factor(fg_map[d$food_group], levels = fg_levels)
+    d$region  <- factor(d$group, levels = regions_rev)
+    d$fs_plot <- factor(d$fs_plot, levels = c("Small", "Large"),
+                        labels = c("Small (<5 ha)", "Large (>50 ha)"))
+    d
   }
+  df_2020 <- fix_labs(df_2020)
+  df_end  <- fix_labs(df_end)
   
-  # legend
-  color_legend <- cowplot::get_legend(
-    p + theme(legend.position = "bottom",
-              legend.justification = "center",
-              legend.text = element_text(size = 10),
-              legend.key.width = unit(1, "cm"))
-  )
+  row_shade_df <- data.frame(region = levels(df_2020$region)) %>%
+    mutate(i = as.numeric(factor(region, levels = regions_rev)),
+           ymin = i - 0.5, ymax = i + 0.5) %>%
+    filter(i %% 2 == 0)
   
-  p_key <- ggplot() +
-    geom_segment(aes(x = 0.5, xend = 2.5, y = 0, yend = 0),
-                 color = "grey55", linewidth = 3, alpha = 0.85,
-                 arrow = arrow(ends = "both",
-                               type = "closed",
-                               angle = 20,
-                               length = unit(0.1, "inches"))) +
-    geom_segment(aes(x = 1.5, xend = 1.5, y = -1, yend = 1),
-                 color = "grey15", linewidth = 1) +
-    annotate("text", x = 1.5, y = -1.8,
-             label = "2020 baseline", hjust = 0.5, vjust = 0, size = 3,
-             color = "grey15", fontface = "bold") +
-    annotate("text", x = 1.5, y = 2.3,
-             label = paste0("Range across ", year_end, " diet scenarios"), hjust = 0.5, vjust = 1.2, size = 3.5,
-             color = "grey30") +
-    coord_cartesian(xlim = c(-0.5, 3.5), ylim = c(-2, 2)) +
-    theme_void() +
-    theme(plot.margin = margin(0, 10, 0, 10))
-  
-  p_main <- p + theme(legend.position = "none")
-  
-  legend_row <- patchwork::wrap_plots(
-    p_key,
-    patchwork::wrap_elements(full = color_legend),
-    nrow = 1,
-    widths = c(1.5, 1.5)
-  )
-  
-  p_combined <- p_main / legend_row +
-    plot_layout(heights = c(15, 1.5))
-  
-  return(p_combined)
+  ggplot() +
+    geom_rect(data = row_shade_df,
+              aes(xmin = -Inf, xmax = Inf, ymin = ymin, ymax = ymax),
+              fill = "grey95", alpha = 0.6, inherit.aes = FALSE) +
+    
+    facet_grid(food ~ fs_plot) +
+    
+    geom_point(data = df_end,
+               aes(x = value, y = as.numeric(region), fill = diet),
+               shape = 21, size = 2.9, stroke = 0.6, colour = "white", alpha = 0.7) +
+    
+    geom_point(data = df_2020,
+               aes(x = value, y = as.numeric(region), shape = base),
+               colour = "grey25", size = 4, stroke = 1.1) +
+    
+    scale_fill_manual(
+      values = diet_cols, name = "Diet",
+      guide = guide_legend(order = 1, ncol = 1,
+                           override.aes = list(size = 3, alpha = 1))
+    ) +
+    scale_shape_manual(
+      values = c("2020 baseline" = 124), name = NULL,
+      guide = guide_legend(order = 2, override.aes = list(size = 5))
+    ) +
+    
+    scale_y_continuous(breaks = seq_along(regions_rev), labels = regions_rev,
+                       expand = expansion(add = 0.6)) +
+    scale_x_continuous(limits = c(-0.05, 1.05), breaks = seq(0, 1, 0.25),
+                       labels = scales::percent_format(accuracy = 1),
+                       expand = c(0, 0)) +
+    
+    labs(x = paste0("Share of ", tolower(var_label), " (%)"), y = NULL) +
+    
+    theme_minimal(base_size = 13) +
+    theme(
+      strip.text        = element_text(face = "bold", size = 11),
+      strip.background  = element_blank(),
+      axis.text.y       = element_text(size = 9, face = "bold", colour = "grey10"),
+      axis.text.x       = element_text(size = 10, colour = "black"),
+      axis.title.x      = element_text(size = 13, colour = "black",
+                                       margin = margin(t = 10)),
+      axis.ticks.x      = element_line(colour = "grey40", linewidth = 0.4),
+      axis.ticks.length = unit(3, "pt"),
+      panel.grid.major.x = element_line(colour = "grey85", linewidth = 0.4),
+      panel.grid.major.y = element_blank(),
+      panel.grid.minor   = element_blank(),
+      panel.border      = element_rect(colour = "grey60", fill = NA, linewidth = 0.6),
+      panel.spacing     = unit(0.7, "lines"),
+      legend.position   = "right",
+      legend.title      = element_text(size = 12, face = "bold"),
+      legend.text       = element_text(size = 11),
+      legend.key.height = unit(1.1, "lines"),
+      legend.spacing.y  = unit(1.2, "lines")
+    )
 }
 
-p_cons_share = plot_share_range(df, "cons")
+p_cons_share = plot_share_grid(df, "cons")
 p_cons_share
-ggsave(paste0("range_chart_cons_small_large_", size_scn_pick, "_", year_end, ".png"),
-       p_cons_share, width = 10, height = 6.5, dpi = 300)
+ggsave(paste0("range_cons_share_small_large_", size_scn_pick, "_", year_end, ".png"),
+       p_cons_share, width = 8, height = 10, dpi = 300)
 
-
-p_prod_share = plot_share_range(df, "prod")
+p_prod_share = plot_share_grid(df, "prod")
 p_prod_share
-ggsave(paste0("range_chart_prod_small_large_", size_scn_pick, "_", year_end, ".png"),
-       p_prod_share, width = 10, height = 6.5, dpi = 300)
+ggsave(paste0("range_prod_share_small_large_", size_scn_pick, "_", year_end, ".png"),
+       p_prod_share, width = 8, height = 10, dpi = 300)
 
-p_exp_share = plot_share_range(df, "exp")
+p_exp_share = plot_share_grid(df, "exp")
 p_exp_share
-ggsave(paste0("range_chart_exp_small_large_", size_scn_pick, "_", year_end, ".png"),
-       p_exp_share, width = 10, height = 6.5, dpi = 300)
+ggsave(paste0("range_exp_share_small_large_", size_scn_pick, "_", year_end, ".png"),
+       p_exp_share, width = 8, height = 10, dpi = 300)
 
-p_imp_share = plot_share_range(df, "imp")
+p_imp_share = plot_share_grid(df, "imp")
 p_imp_share
-ggsave(paste0("range_chart_imp_small_large_", size_scn_pick, "_", year_end, ".png"),
-       p_imp_share, width = 10, height = 6.5, dpi = 300)
+ggsave(paste0("range_imp_share_small_large_", size_scn_pick, "_", year_end, ".png"),
+       p_imp_share, width = 8, height = 10, dpi = 300)
+
+
 
 #######################################################################################
 #################################### BOXPLOTS #########################################
