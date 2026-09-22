@@ -18,7 +18,7 @@ farm-size-diets/
 
 ## Data
 
-Input scripts read from external data directories (e.g. `../../data/farm_size/` and `../../../GoogleDrive-.../DPhil/`) that are not tracked in version control and must be available locally to run. These include:
+Input scripts read from external data directories (e.g. `../../data/farm_size/` and `../../../GoogleDrive-.../DPhil/`) and include:
 
 - Farm-size distributions, processed in Google Earth Engine:
   - [area by farm size](https://code.earthengine.google.com/c46eb857d355e0f76da1d34ce39fbd84)
@@ -27,7 +27,10 @@ Input scripts read from external data directories (e.g. `../../data/farm_size/` 
 - FAOSTAT [Supply Utilization Accounts](https://www.fao.org/faostat/en/#data)
 - Scenario outputs from [future_food_scenarios](https://github.com/shrutijain90/future_food_scenarios)
 
+These are not tracked in version control and must be available locally to run.
+
 ## Dependencies
 
-Python: pandas, numpy, geopandas, matplotlib, seaborn, networkx, shapely, adjustText, cmcrameri, cmocean.
+Python: pandas, numpy, geopandas, matplotlib, seaborn, networkx, shapely, basemap.
+
 R: ggplot2, dplyr, readr, tidyr, scales, patchwork, circlize, legendry, conflicted, shadowtext, forcats, ggh4x.
