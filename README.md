@@ -18,7 +18,7 @@ farm-size-diets/
 
 ## Data
 
-Input scripts read from external data directories (e.g. `../../data/farm_size/` and `../../../GoogleDrive-.../DPhil/`) and include:
+Input scripts read from external data directories (e.g. `../../data/farm_size/`, `../../DPhil/data`, and `../../DPhil/OPSIS/Data`) and include:
 
 - Farm-size distributions, processed in Google Earth Engine:
   - [area by farm size](https://code.earthengine.google.com/c46eb857d355e0f76da1d34ce39fbd84)
